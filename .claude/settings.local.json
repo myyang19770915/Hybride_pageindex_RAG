@@ -1,0 +1,10 @@
+{
+  "permissions": {
+    "allow": [
+      "Bash(uv run *)",
+      "Bash(PYTHONPATH=backend uv run --no-sync python -c \"import app.main; print\\('import OK'\\)\")",
+      "Bash(timeout 300 uv add --optional observability \"openinference-instrumentation-agno>=0.1.0\" \"arize-phoenix>=4.0.0\" \"opentelemetry-exporter-otlp>=1.27.0\")",
+      "Bash(PYTHONPATH=backend uv run python -c \"from app.core.tracing import configure_tracing, span, add_event; print\\('tracing import OK'\\)\")"
+    ]
+  }
+}
