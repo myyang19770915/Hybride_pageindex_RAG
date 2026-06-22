@@ -23,3 +23,6 @@ build/
 *.log
 *.sqlite3
 .gstack/
+
+# RAG eval run outputs (golden_set.jsonl stays tracked)
+backend/eval/results/
