@@ -18,6 +18,12 @@ from app.services.synthesis import AnswerSynthesisService
 from app.services.vector_store import VectorStoreService
 
 _MAX_RERANKED_PAGES = 5
+# How many top node hits to union into the rerank candidate pool. TOC nodes are
+# often single-page, so 1 node = 1 page and the rerank has nothing to do.
+_NODE_HITS_FOR_RERANK = 5
+# Number of top reranked pages to surface as citations (the answer is synthesised
+# from more, but citations should point at the most relevant source pages).
+_MAX_CITATION_PAGES = 2
 
 
 class RetrievalService:
@@ -112,19 +118,32 @@ class RetrievalService:
         )
         yield trace[-1]
         answer = synthesis.answer
-        citations = []
-        if selected_pages:
-            page_numbers = [page.page_number for page in selected_pages]
-            citations.append(
-                Citation(
-                    document_id=document.document_id,
-                    file_name=document.file_name,
-                    start_page=min(page_numbers),
-                    end_page=max(page_numbers),
-                )
-            )
+        # Cite the most relevant pages the rerank actually surfaced, not the whole
+        # candidate span — a min..max range over scattered candidates is both
+        # imprecise and misleading about where the answer came from.
+        citations = self._citations_for(document, synthesis_pages)
 
         yield QueryResponse(answer=answer, mode=mode, citations=citations, trace=trace)
+
+    def _citations_for(
+        self, document: DocumentDetail, pages: list[DocumentPage]
+    ) -> list[Citation]:
+        """Narrow citations from the top reranked pages, merging contiguous ones."""
+        top = sorted({page.page_number for page in pages[:_MAX_CITATION_PAGES]})
+        citations: list[Citation] = []
+        for number in top:
+            if citations and number == citations[-1].end_page + 1:
+                citations[-1] = citations[-1].model_copy(update={"end_page": number})
+            else:
+                citations.append(
+                    Citation(
+                        document_id=document.document_id,
+                        file_name=document.file_name,
+                        start_page=number,
+                        end_page=number,
+                    )
+                )
+        return citations
 
     def _resolve_strategy(self, request: QueryRequest) -> RetrievalStrategy:
         if request.strategy is not None:
@@ -295,21 +314,33 @@ class RetrievalService:
         ]
         if not doc_hits:
             return None
-        best = doc_hits[0]  # query_points returns hits sorted by score, best first
-        start = best["start_page"]
-        end = best.get("end_page") or start
+        # TOC nodes are often single-page, so committing to only doc_hits[0]
+        # collapses retrieval to one (frequently the title/intro) page and starves
+        # the BM25 rerank of candidates. Union the pages of the top-K node hits so
+        # the rerank has real material and deep pages can surface.
         by_number = {page.page_number: page for page in pages}
-        selected = [by_number[number] for number in range(start, end + 1) if number in by_number]
+        page_numbers: list[int] = []
+        for hit in doc_hits[:_NODE_HITS_FOR_RERANK]:
+            start = hit["start_page"]
+            end = hit.get("end_page") or start
+            page_numbers.extend(range(start, end + 1))
+        ordered_unique = sorted({n for n in page_numbers if n in by_number})
+        selected = [by_number[number] for number in ordered_unique]
         if not selected:
             return None
+        best = doc_hits[0]  # query_points returns hits sorted by score, best first
         trace.append(
             TraceEvent(
                 stage="vector_node",
-                message=f"Matched TOC node {best.get('node_id')}: {best.get('heading')}",
+                message=(
+                    f"Matched {min(len(doc_hits), _NODE_HITS_FOR_RERANK)} TOC node(s); "
+                    f"top {best.get('node_id')}: {best.get('heading')}; "
+                    f"{len(selected)} candidate page(s) for rerank."
+                ),
                 document_id=document.document_id,
                 document_name=document.file_name,
-                start_page=start,
-                end_page=end,
+                start_page=ordered_unique[0],
+                end_page=ordered_unique[-1],
             )
         )
         return selected
