@@ -58,6 +58,11 @@ class Settings(BaseSettings):
     # many top reranked pages to surface as citations.
     retrieval_node_hits: int = 16  # eval A/B: saturates page hit ~72% at >=16
     retrieval_citation_pages: int = 2
+    # Page reranker. bm25 = local keyword (free, but a title/abstract magnet and
+    # weak on tables). cohere = semantic cross-lingual API reranker.
+    rerank_provider: str = "bm25"  # bm25 | cohere
+    cohere_api_key: str = ""
+    cohere_rerank_model: str = "rerank-v3.5"
 
     use_agno: bool = False
     llm_toc_summary: bool = False  # one LLM call per TOC node; off keeps ingestion fast
