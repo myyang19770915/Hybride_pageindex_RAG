@@ -29,24 +29,32 @@ class RetrievalService:
         self.document_service = document_service or DocumentService()
         self.synthesis_service = synthesis_service or AnswerSynthesisService()
 
-    def answer(self, request: QueryRequest, principal: Principal | None = None) -> QueryResponse:
-        events = list(self.answer_events(request, principal))
+    def answer(
+        self, request: QueryRequest, principal: Principal | None = None, synthesize: bool = True
+    ) -> QueryResponse:
+        events = list(self.answer_events(request, principal, synthesize))
         return events[-1]
 
     def answer_events(
-        self, request: QueryRequest, principal: Principal | None = None
+        self,
+        request: QueryRequest,
+        principal: Principal | None = None,
+        synthesize: bool = True,
     ) -> Iterator[TraceEvent | QueryResponse]:
         with span(
             "retrieval.pipeline",
             {"query": request.query, "mode": request.mode, "top_k": request.top_k},
         ) as pipeline_span:
-            for event in self._pipeline_events(request, principal):
+            for event in self._pipeline_events(request, principal, synthesize):
                 if isinstance(event, TraceEvent) and pipeline_span is not None:
                     pipeline_span.add_event(event.stage, {"message": event.message})
                 yield event
 
     def _pipeline_events(
-        self, request: QueryRequest, principal: Principal | None = None
+        self,
+        request: QueryRequest,
+        principal: Principal | None = None,
+        synthesize: bool = True,
     ) -> Iterator[TraceEvent | QueryResponse]:
         mode = QueryMode.hybrid_agentic if request.mode == QueryMode.auto else request.mode
         trace = [TraceEvent(stage="router", message=f"Selected retrieval mode: {mode}")]
@@ -101,17 +109,24 @@ class RetrievalService:
         yield trace[-1]
 
         synthesis_pages = ranked_pages if ranked_pages is not None else selected_pages
-        synthesis = self.synthesis_service.synthesize(request.query, document, synthesis_pages)
-        trace.append(
-            TraceEvent(
-                stage="synthesis",
-                message=f"Generated answer via {synthesis.method} synthesis.",
-                document_id=document.document_id,
-                document_name=document.file_name,
+        # Retrieval-only mode (eval tuning): skip the LLM synthesis call but still
+        # produce citations, which depend only on the reranked pages, not the answer.
+        if synthesize:
+            synthesis = self.synthesis_service.synthesize(
+                request.query, document, synthesis_pages
             )
-        )
-        yield trace[-1]
-        answer = synthesis.answer
+            trace.append(
+                TraceEvent(
+                    stage="synthesis",
+                    message=f"Generated answer via {synthesis.method} synthesis.",
+                    document_id=document.document_id,
+                    document_name=document.file_name,
+                )
+            )
+            yield trace[-1]
+            answer = synthesis.answer
+        else:
+            answer = ""
         # Cite the most relevant pages the rerank actually surfaced, not the whole
         # candidate span — a min..max range over scattered candidates is both
         # imprecise and misleading about where the answer came from.

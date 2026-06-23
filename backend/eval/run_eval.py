@@ -115,7 +115,9 @@ def evaluate(
         request = QueryRequest(query=item.query, top_k=top_k, strategy=strategy)
         started = time.monotonic()
         try:
-            response = service.answer(request)
+            # Skip LLM synthesis unless we need the answer for the faithfulness judge:
+            # page/doc-hit and MRR depend only on retrieval + citations. ~10x faster.
+            response = service.answer(request, synthesize=judge)
             latency_ms = (time.monotonic() - started) * 1000
             citations = [
                 RetrievedCitation(c.document_id, c.start_page, c.end_page)
