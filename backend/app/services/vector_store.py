@@ -22,11 +22,14 @@ from qdrant_client.models import (
 )
 
 from app.core.config import get_settings
-from app.schemas.documents import DocumentDetail, TocNode
+from app.schemas.documents import DocumentDetail, DocumentPage, TocNode
 from app.services.embeddings import EmbeddingService
 from app.services.ranking import tokenize
 
 _SUMMARY_TEXT_LIMIT = 1500
+# Cap on the node text sent to the embedder (the model truncates by tokens anyway;
+# this bounds payload size for multi-page nodes like a References section).
+_NODE_EMBED_LIMIT = 6000
 _DENSE_VECTOR = "dense"
 _SPARSE_VECTOR = "bm25"
 
@@ -99,22 +102,37 @@ class VectorStoreService:
     def _node_point_id(self, document_id: str, node_id: str) -> str:
         return str(uuid5(NAMESPACE_URL, f"{document_id}:node:{node_id}"))
 
-    def upsert_document(self, document: DocumentDetail) -> int:
-        """Embed one point per TOC node with both a dense and a BM25 sparse vector."""
+    def upsert_document(
+        self, document: DocumentDetail, pages: list[DocumentPage] | None = None
+    ) -> int:
+        """Embed one point per TOC node with both a dense and a BM25 sparse vector.
+
+        The embedded text is the node's heading + its full page content (capped),
+        not the extractive summary. Summaries are lossy and sometimes capture a
+        leading figure's OCR instead of the section body, which wrecks node recall
+        for data/table queries. Embedding the real content aligns the vector with
+        what users actually ask about. The payload ``summary`` stays for display.
+        """
         self.ensure_collection()
         self.delete_document(document.document_id)
 
+        page_text = {page.page_number: (page.page_content or "") for page in (pages or [])}
         points: list[PointStruct] = []
         for node in _flatten_toc(document.toc):
             summary = (node.summary or node.heading or "").strip()
-            if not summary:
+            body = "\n".join(
+                page_text.get(n, "") for n in range(node.start_page, node.end_page + 1)
+            ).strip()
+            full = f"{node.heading}\n{body}".strip() if body else summary
+            embed_text = full[:_NODE_EMBED_LIMIT]
+            if not embed_text:
                 continue
             points.append(
                 PointStruct(
                     id=self._node_point_id(document.document_id, node.node_id),
                     vector={
-                        _DENSE_VECTOR: self.embedding_service.embed(summary),
-                        _SPARSE_VECTOR: _sparse_vector(summary),
+                        _DENSE_VECTOR: self.embedding_service.embed(embed_text),
+                        _SPARSE_VECTOR: _sparse_vector(embed_text),
                     },
                     payload={
                         "document_id": document.document_id,
