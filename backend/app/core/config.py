@@ -56,7 +56,11 @@ class Settings(BaseSettings):
     # Page-level retrieval tuning (see RetrievalService). node_hits = how many top
     # TOC-node hits to union into the rerank candidate pool; citation_pages = how
     # many top reranked pages to surface as citations.
-    retrieval_node_hits: int = 16  # eval A/B: saturates page hit ~72% at >=16
+    # ~all pages of the selected doc become rerank candidates. The old cap (16)
+    # plus a small node-fetch starved the answer page's node out of the pool;
+    # widening it lifted page hit +8pp for BOTH rerankers (eval A/B). The reranker
+    # sorts, so a generous pool only helps recall (cost is per-page rerank only).
+    retrieval_node_hits: int = 40
     retrieval_citation_pages: int = 2
     # Page reranker. bm25 = local keyword (free, but a title/abstract magnet and
     # weak on tables). cohere = semantic cross-lingual API reranker.

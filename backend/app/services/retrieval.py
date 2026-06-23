@@ -308,8 +308,13 @@ class RetrievalService:
         if not get_settings().use_qdrant:
             return None
         try:
+            # Fetch a generous global node pool: search_nodes returns hits across
+            # ALL documents, so a small cap starves the already-selected document
+            # of its own nodes (the answer page's node may not make the global
+            # top-N). Pull enough that node_hits worth of THIS doc's nodes survive.
+            node_fetch = max(get_settings().retrieval_node_hits * 4, 40)
             hits = VectorStoreService().search_nodes(
-                request.query, max(request.top_k * 3, 10), self._resolve_strategy(request).value
+                request.query, node_fetch, self._resolve_strategy(request).value
             )
         except Exception as exc:
             trace.append(
