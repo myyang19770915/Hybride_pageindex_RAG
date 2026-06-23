@@ -50,6 +50,11 @@ class Settings(BaseSettings):
     retrieval_rerank: bool = True
     bm25_k1: float = 1.5
     bm25_b: float = 0.75
+    # Page-level retrieval tuning (see RetrievalService). node_hits = how many top
+    # TOC-node hits to union into the rerank candidate pool; citation_pages = how
+    # many top reranked pages to surface as citations.
+    retrieval_node_hits: int = 8  # tuned via eval A/B: 8 beats 5 and 10 on page hit rate
+    retrieval_citation_pages: int = 2
 
     use_agno: bool = False
     llm_toc_summary: bool = False  # one LLM call per TOC node; off keeps ingestion fast

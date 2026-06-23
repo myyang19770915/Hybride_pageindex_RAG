@@ -18,12 +18,6 @@ from app.services.synthesis import AnswerSynthesisService
 from app.services.vector_store import VectorStoreService
 
 _MAX_RERANKED_PAGES = 5
-# How many top node hits to union into the rerank candidate pool. TOC nodes are
-# often single-page, so 1 node = 1 page and the rerank has nothing to do.
-_NODE_HITS_FOR_RERANK = 5
-# Number of top reranked pages to surface as citations (the answer is synthesised
-# from more, but citations should point at the most relevant source pages).
-_MAX_CITATION_PAGES = 2
 
 
 class RetrievalService:
@@ -129,7 +123,8 @@ class RetrievalService:
         self, document: DocumentDetail, pages: list[DocumentPage]
     ) -> list[Citation]:
         """Narrow citations from the top reranked pages, merging contiguous ones."""
-        top = sorted({page.page_number for page in pages[:_MAX_CITATION_PAGES]})
+        limit = get_settings().retrieval_citation_pages
+        top = sorted({page.page_number for page in pages[:limit]})
         citations: list[Citation] = []
         for number in top:
             if citations and number == citations[-1].end_page + 1:
@@ -318,9 +313,10 @@ class RetrievalService:
         # collapses retrieval to one (frequently the title/intro) page and starves
         # the BM25 rerank of candidates. Union the pages of the top-K node hits so
         # the rerank has real material and deep pages can surface.
+        node_hits = get_settings().retrieval_node_hits
         by_number = {page.page_number: page for page in pages}
         page_numbers: list[int] = []
-        for hit in doc_hits[:_NODE_HITS_FOR_RERANK]:
+        for hit in doc_hits[:node_hits]:
             start = hit["start_page"]
             end = hit.get("end_page") or start
             page_numbers.extend(range(start, end + 1))
@@ -333,7 +329,7 @@ class RetrievalService:
             TraceEvent(
                 stage="vector_node",
                 message=(
-                    f"Matched {min(len(doc_hits), _NODE_HITS_FOR_RERANK)} TOC node(s); "
+                    f"Matched {min(len(doc_hits), node_hits)} TOC node(s); "
                     f"top {best.get('node_id')}: {best.get('heading')}; "
                     f"{len(selected)} candidate page(s) for rerank."
                 ),
