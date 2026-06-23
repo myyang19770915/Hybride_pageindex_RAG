@@ -29,24 +29,32 @@ class RetrievalService:
         self.document_service = document_service or DocumentService()
         self.synthesis_service = synthesis_service or AnswerSynthesisService()
 
-    def answer(self, request: QueryRequest, principal: Principal | None = None) -> QueryResponse:
-        events = list(self.answer_events(request, principal))
+    def answer(
+        self, request: QueryRequest, principal: Principal | None = None, synthesize: bool = True
+    ) -> QueryResponse:
+        events = list(self.answer_events(request, principal, synthesize))
         return events[-1]
 
     def answer_events(
-        self, request: QueryRequest, principal: Principal | None = None
+        self,
+        request: QueryRequest,
+        principal: Principal | None = None,
+        synthesize: bool = True,
     ) -> Iterator[TraceEvent | QueryResponse]:
         with span(
             "retrieval.pipeline",
             {"query": request.query, "mode": request.mode, "top_k": request.top_k},
         ) as pipeline_span:
-            for event in self._pipeline_events(request, principal):
+            for event in self._pipeline_events(request, principal, synthesize):
                 if isinstance(event, TraceEvent) and pipeline_span is not None:
                     pipeline_span.add_event(event.stage, {"message": event.message})
                 yield event
 
     def _pipeline_events(
-        self, request: QueryRequest, principal: Principal | None = None
+        self,
+        request: QueryRequest,
+        principal: Principal | None = None,
+        synthesize: bool = True,
     ) -> Iterator[TraceEvent | QueryResponse]:
         mode = QueryMode.hybrid_agentic if request.mode == QueryMode.auto else request.mode
         trace = [TraceEvent(stage="router", message=f"Selected retrieval mode: {mode}")]
@@ -101,30 +109,51 @@ class RetrievalService:
         yield trace[-1]
 
         synthesis_pages = ranked_pages if ranked_pages is not None else selected_pages
-        synthesis = self.synthesis_service.synthesize(request.query, document, synthesis_pages)
-        trace.append(
-            TraceEvent(
-                stage="synthesis",
-                message=f"Generated answer via {synthesis.method} synthesis.",
-                document_id=document.document_id,
-                document_name=document.file_name,
+        # Retrieval-only mode (eval tuning): skip the LLM synthesis call but still
+        # produce citations, which depend only on the reranked pages, not the answer.
+        if synthesize:
+            synthesis = self.synthesis_service.synthesize(
+                request.query, document, synthesis_pages
             )
-        )
-        yield trace[-1]
-        answer = synthesis.answer
-        citations = []
-        if selected_pages:
-            page_numbers = [page.page_number for page in selected_pages]
-            citations.append(
-                Citation(
+            trace.append(
+                TraceEvent(
+                    stage="synthesis",
+                    message=f"Generated answer via {synthesis.method} synthesis.",
                     document_id=document.document_id,
-                    file_name=document.file_name,
-                    start_page=min(page_numbers),
-                    end_page=max(page_numbers),
+                    document_name=document.file_name,
                 )
             )
+            yield trace[-1]
+            answer = synthesis.answer
+        else:
+            answer = ""
+        # Cite the most relevant pages the rerank actually surfaced, not the whole
+        # candidate span — a min..max range over scattered candidates is both
+        # imprecise and misleading about where the answer came from.
+        citations = self._citations_for(document, synthesis_pages)
 
         yield QueryResponse(answer=answer, mode=mode, citations=citations, trace=trace)
+
+    def _citations_for(
+        self, document: DocumentDetail, pages: list[DocumentPage]
+    ) -> list[Citation]:
+        """Narrow citations from the top reranked pages, merging contiguous ones."""
+        limit = get_settings().retrieval_citation_pages
+        top = sorted({page.page_number for page in pages[:limit]})
+        citations: list[Citation] = []
+        for number in top:
+            if citations and number == citations[-1].end_page + 1:
+                citations[-1] = citations[-1].model_copy(update={"end_page": number})
+            else:
+                citations.append(
+                    Citation(
+                        document_id=document.document_id,
+                        file_name=document.file_name,
+                        start_page=number,
+                        end_page=number,
+                    )
+                )
+        return citations
 
     def _resolve_strategy(self, request: QueryRequest) -> RetrievalStrategy:
         if request.strategy is not None:
@@ -295,21 +324,34 @@ class RetrievalService:
         ]
         if not doc_hits:
             return None
-        best = doc_hits[0]  # query_points returns hits sorted by score, best first
-        start = best["start_page"]
-        end = best.get("end_page") or start
+        # TOC nodes are often single-page, so committing to only doc_hits[0]
+        # collapses retrieval to one (frequently the title/intro) page and starves
+        # the BM25 rerank of candidates. Union the pages of the top-K node hits so
+        # the rerank has real material and deep pages can surface.
+        node_hits = get_settings().retrieval_node_hits
         by_number = {page.page_number: page for page in pages}
-        selected = [by_number[number] for number in range(start, end + 1) if number in by_number]
+        page_numbers: list[int] = []
+        for hit in doc_hits[:node_hits]:
+            start = hit["start_page"]
+            end = hit.get("end_page") or start
+            page_numbers.extend(range(start, end + 1))
+        ordered_unique = sorted({n for n in page_numbers if n in by_number})
+        selected = [by_number[number] for number in ordered_unique]
         if not selected:
             return None
+        best = doc_hits[0]  # query_points returns hits sorted by score, best first
         trace.append(
             TraceEvent(
                 stage="vector_node",
-                message=f"Matched TOC node {best.get('node_id')}: {best.get('heading')}",
+                message=(
+                    f"Matched {min(len(doc_hits), node_hits)} TOC node(s); "
+                    f"top {best.get('node_id')}: {best.get('heading')}; "
+                    f"{len(selected)} candidate page(s) for rerank."
+                ),
                 document_id=document.document_id,
                 document_name=document.file_name,
-                start_page=start,
-                end_page=end,
+                start_page=ordered_unique[0],
+                end_page=ordered_unique[-1],
             )
         )
         return selected

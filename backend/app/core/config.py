@@ -46,10 +46,18 @@ class Settings(BaseSettings):
     qdrant_collection: str = "km_nodes"
     qdrant_vector_size: int = 1024
 
-    retrieval_strategy: str = "hybrid"  # dense | bm25 | hybrid
+    # dense beats hybrid for this cross-lingual corpus (zh queries / en docs);
+    # eval A/B (50q): dense 72% page / 100% doc vs hybrid 64% / 98%. Re-test if
+    # the corpus becomes same-language (BM25 sparse may help again).
+    retrieval_strategy: str = "dense"  # dense | bm25 | hybrid
     retrieval_rerank: bool = True
     bm25_k1: float = 1.5
     bm25_b: float = 0.75
+    # Page-level retrieval tuning (see RetrievalService). node_hits = how many top
+    # TOC-node hits to union into the rerank candidate pool; citation_pages = how
+    # many top reranked pages to surface as citations.
+    retrieval_node_hits: int = 16  # eval A/B: saturates page hit ~72% at >=16
+    retrieval_citation_pages: int = 2
 
     use_agno: bool = False
     llm_toc_summary: bool = False  # one LLM call per TOC node; off keeps ingestion fast
