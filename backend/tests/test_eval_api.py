@@ -32,3 +32,27 @@ def test_run_eval_returns_metrics_and_items() -> None:
 def test_run_eval_rejects_bad_top_k() -> None:
     response = client.post("/api/eval/run", json={"top_k": 999})
     assert response.status_code == 422  # validation: top_k max 20
+
+
+def test_run_eval_disables_progress_print(monkeypatch) -> None:
+    # Regression: evaluate()'s per-item print() crashed POST /eval/run on Windows
+    # (cp950 stdout) for queries with un-encodable CJK. The API must always pass
+    # progress=False so it never prints.
+    from app.api.routes import eval as eval_route
+
+    captured = {}
+
+    def fake_evaluate(items, top_k, strategy, judge, progress=True):
+        captured["progress"] = progress
+        return []
+
+    monkeypatch.setattr(eval_route, "evaluate", fake_evaluate, raising=False)
+    # Import path: route does `from eval.run_eval import evaluate` inside the
+    # handler, so patch there too.
+    import eval.run_eval as run_eval_mod
+
+    monkeypatch.setattr(run_eval_mod, "evaluate", fake_evaluate)
+
+    response = client.post("/api/eval/run", json={"limit": 1})
+    assert response.status_code == 200
+    assert captured.get("progress") is False
