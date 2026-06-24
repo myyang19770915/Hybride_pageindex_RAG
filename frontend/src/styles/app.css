@@ -1440,3 +1440,37 @@ textarea {
   font-size: 11px;
   color: #8597a8;
 }
+
+/* --- Eval golden viewer --- */
+.eval-golden {
+  border-bottom: 1px solid #e4eef4;
+}
+
+.eval-golden-toggle {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  width: 100%;
+  padding: 12px 20px;
+  background: #f7fafc;
+  border: 0;
+  cursor: pointer;
+  font-size: 13px;
+  font-weight: 600;
+  color: #24506b;
+}
+
+.eval-golden .eval-table-wrap {
+  flex: none;
+  max-height: 300px;
+  padding-top: 0;
+}
+
+.eval-nowrap {
+  white-space: nowrap;
+}
+
+.eval-expected {
+  color: #52667a;
+  max-width: 360px;
+}

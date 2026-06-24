@@ -1,4 +1,12 @@
-import { BarChart3, CheckCircle2, Loader2, Play, XCircle } from "lucide-react";
+import {
+  BarChart3,
+  CheckCircle2,
+  ChevronDown,
+  ChevronRight,
+  Loader2,
+  Play,
+  XCircle
+} from "lucide-react";
 import { useEffect, useState } from "react";
 
 import { EvalConfig, EvalRunResult, GoldenItem, api } from "../api/client";
@@ -40,6 +48,7 @@ export function EvalPanel() {
   const [running, setRunning] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [result, setResult] = useState<EvalRunResult | null>(null);
+  const [showGolden, setShowGolden] = useState(true);
 
   useEffect(() => {
     api.evalGolden().then(setGolden).catch(() => setGolden([]));
@@ -158,6 +167,42 @@ export function EvalPanel() {
         <p className="eval-note">在 {golden.length} 題上跑檢索，可能需數十秒（cohere 每題一次 API 呼叫）。</p>
       )}
       {error && <div className="clarify-box clarify-box--insufficient">{error}</div>}
+
+      <div className="eval-golden">
+        <button
+          className="eval-golden-toggle"
+          onClick={() => setShowGolden((v) => !v)}
+          type="button"
+        >
+          {showGolden ? <ChevronDown size={15} /> : <ChevronRight size={15} />}
+          目前 Golden 題庫（{golden.length} 題）
+        </button>
+        {showGolden && (
+          <div className="eval-table-wrap">
+            <table className="eval-table">
+              <thead>
+                <tr>
+                  <th>檔案 · 頁</th>
+                  <th>問題</th>
+                  <th>預期答案</th>
+                </tr>
+              </thead>
+              <tbody>
+                {golden.map((g) => (
+                  <tr key={g.id}>
+                    <td className="eval-nowrap">
+                      {g.file_name}
+                      <span className="eval-file"> p{g.page_number}</span>
+                    </td>
+                    <td>{g.query}</td>
+                    <td className="eval-expected">{g.expected_answer}</td>
+                  </tr>
+                ))}
+              </tbody>
+            </table>
+          </div>
+        )}
+      </div>
 
       {m && result && (
         <>
