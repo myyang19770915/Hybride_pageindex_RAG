@@ -107,8 +107,14 @@ def _mark(outcome: Outcome) -> str:
 
 
 def evaluate(
-    items: list[GoldenItem], top_k: int, strategy: RetrievalStrategy | None, judge: bool
+    items: list[GoldenItem],
+    top_k: int,
+    strategy: RetrievalStrategy | None,
+    judge: bool,
+    progress: bool = True,
 ) -> list[Outcome]:
+    # progress=False for non-console callers (the API): the per-item print() crashes
+    # on Windows when stdout is cp950 and a query contains an un-encodable CJK char.
     # Imported lazily so settings overrides (--set) land before the stack reads them.
     from app.services.retrieval import RetrievalService
 
@@ -146,10 +152,11 @@ def evaluate(
                 item=item, status=f"error:{type(exc).__name__}", answer=str(exc)[:200],
                 citations=[], latency_ms=latency_ms,
             )
-        print(
-            f"[{n:>3}/{len(items)}] {_mark(outcome)} rank={outcome.rank} "
-            f"{outcome.item.file_name} p{item.page_number}: {item.query[:46]}"
-        )
+        if progress:
+            print(
+                f"[{n:>3}/{len(items)}] {_mark(outcome)} rank={outcome.rank} "
+                f"{outcome.item.file_name} p{item.page_number}: {item.query[:46]}"
+            )
         outcomes.append(outcome)
 
     return outcomes

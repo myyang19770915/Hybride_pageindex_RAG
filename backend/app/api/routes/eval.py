@@ -139,7 +139,7 @@ def run_eval(config: EvalConfig) -> EvalRunResult:
                     status_code=status.HTTP_404_NOT_FOUND, detail="Golden set is empty."
                 )
             strategy = RetrievalStrategy(config.strategy) if config.strategy else None
-            outcomes = evaluate(items, config.top_k, strategy, judge=False)
+            outcomes = evaluate(items, config.top_k, strategy, judge=False, progress=False)
             settings = settings_snapshot()
             agg = aggregate(outcomes)
 
