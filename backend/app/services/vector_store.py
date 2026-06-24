@@ -145,6 +145,9 @@ class VectorStoreService:
                         "start_page": node.start_page,
                         "end_page": node.end_page,
                         "summary": summary[:_SUMMARY_TEXT_LIMIT],
+                        # The exact text that was embedded, so read-back matches the
+                        # vector (the extractive summary above can be figure-OCR noise).
+                        "content": embed_text,
                     },
                 )
             )
@@ -213,6 +216,7 @@ class VectorStoreService:
                     "node_id": payload.get("node_id"),
                     "heading": payload.get("heading"),
                     "summary": payload.get("summary"),
+                    "content": payload.get("content"),
                     "start_page": payload.get("start_page"),
                     "end_page": payload.get("end_page"),
                     "score": point.score,
