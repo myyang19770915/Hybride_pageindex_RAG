@@ -33,6 +33,10 @@ _conversation_db = None
 # Agno apps that share the same database/schema.
 CHAT_SESSION_TABLE = "hybride_chat_sessions"
 
+# Per-node content snippet length handed to the agent in search_knowledge results.
+# Enough to convey the section; full page text is fetched via SQL when needed.
+_NODE_SNIPPET_CHARS = 600
+
 
 def _get_conversation_db():
     global _conversation_db
@@ -54,8 +58,8 @@ _SYSTEM_PROMPT = (
     "你是企業知識庫問答助理，採用 PageIndex 風格的代理式檢索。"
     "你的工作流程必須是：\n"
     "1. 先呼叫 `search_knowledge` 工具，對知識庫做混合檢索（向量 + BM25），"
-    "取得最相關的章節節點。每個節點含 document_id、file_name、heading、summary、"
-    "start_page、end_page。\n"
+    "取得最相關的章節節點。每個節點含 document_id、file_name、heading、snippet"
+    "（章節原文摘錄）、start_page、end_page。\n"
     "2. 針對最相關的節點，使用 Postgres 工具的 `run_query` 取回該節點頁碼範圍的原文。"
     "資料表結構如下：\n"
     "   - km_document_pages(document_id TEXT, page_number INT, page_content TEXT)\n"
@@ -158,8 +162,8 @@ class AgentQueryService:
                 top_k: 要取回的節點數量，預設 5。
 
             Returns:
-                JSON 陣列字串；每筆含 document_id、file_name、heading、summary、
-                start_page、end_page、score。
+                JSON 陣列字串；每筆含 document_id、file_name、heading、snippet
+                （章節原文摘錄）、start_page、end_page、score。
             """
             accessible = {
                 document.document_id
@@ -171,7 +175,24 @@ class AgentQueryService:
             )
             filtered = [hit for hit in hits if hit["document_id"] in accessible]
             collected_hits.extend(filtered)
-            return json.dumps(filtered, ensure_ascii=False)
+            # Feed the agent a real content snippet (what was embedded), not the
+            # extractive summary which can be figure-OCR noise. Bounded to keep the
+            # tool result small; the agent fetches full page text via SQL when needed.
+            projected = [
+                {
+                    "document_id": hit["document_id"],
+                    "file_name": hit.get("file_name"),
+                    "heading": hit.get("heading"),
+                    "snippet": (hit.get("content") or hit.get("summary") or "")[
+                        :_NODE_SNIPPET_CHARS
+                    ],
+                    "start_page": hit.get("start_page"),
+                    "end_page": hit.get("end_page"),
+                    "score": hit.get("score"),
+                }
+                for hit in filtered
+            ]
+            return json.dumps(projected, ensure_ascii=False)
 
         model = OpenAILike(
             id=settings.model_id,

@@ -373,7 +373,9 @@ class DocumentService:
 
         job = IngestionService(_documents, _jobs, pages=_document_pages).process_job(job_id)
         if get_settings().use_qdrant and job.status == IngestionStatus.completed:
-            VectorStoreService().upsert_document(self.get_document(job.document_id))
+            VectorStoreService().upsert_document(
+                self.get_document(job.document_id), self.list_pages(job.document_id)
+            )
         return job
 
     def list_pages(
@@ -536,6 +538,9 @@ class DocumentService:
             repo.commit()
 
         if get_settings().use_qdrant and processed_job.status == IngestionStatus.completed:
-            VectorStoreService().upsert_document(self.get_document(processed_job.document_id))
+            VectorStoreService().upsert_document(
+                self.get_document(processed_job.document_id),
+                self.list_pages(processed_job.document_id),
+            )
 
         return self.get_job(job_id)

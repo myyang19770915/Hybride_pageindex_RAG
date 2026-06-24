@@ -56,8 +56,17 @@ class Settings(BaseSettings):
     # Page-level retrieval tuning (see RetrievalService). node_hits = how many top
     # TOC-node hits to union into the rerank candidate pool; citation_pages = how
     # many top reranked pages to surface as citations.
-    retrieval_node_hits: int = 16  # eval A/B: saturates page hit ~72% at >=16
+    # Candidate TOC-node hits fed to the page reranker. With nodes embedded on
+    # their full content (not lossy summaries), the answer node ranks first, so a
+    # focused pool wins: eval A/B (cohere v3.5) peaked at node16=86%; node40 (all
+    # pages) diluted to 82%. Pair with the widened node-fetch in RetrievalService.
+    retrieval_node_hits: int = 16
     retrieval_citation_pages: int = 2
+    # Page reranker. bm25 = local keyword (free, but a title/abstract magnet and
+    # weak on tables). cohere = semantic cross-lingual API reranker.
+    rerank_provider: str = "bm25"  # bm25 | cohere
+    cohere_api_key: str = ""
+    cohere_rerank_model: str = "rerank-v3.5"
 
     use_agno: bool = False
     llm_toc_summary: bool = False  # one LLM call per TOC node; off keeps ingestion fast

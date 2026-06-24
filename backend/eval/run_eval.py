@@ -74,9 +74,13 @@ def load_golden(path: Path) -> list[GoldenItem]:
 def settings_snapshot() -> dict[str, object]:
     """The retrieval knobs that affect eval results, captured for A/B provenance."""
     s = get_settings()
+    rerank = s.rerank_provider
+    if rerank == "cohere":
+        rerank = f"cohere:{s.cohere_rerank_model}"
     return {
         "retrieval_strategy": s.retrieval_strategy,
-        "retrieval_rerank": s.retrieval_rerank,
+        "rerank": rerank,
+        "node_hits": s.retrieval_node_hits,
         "bm25_k1": s.bm25_k1,
         "bm25_b": s.bm25_b,
         "model_id": s.model_id,

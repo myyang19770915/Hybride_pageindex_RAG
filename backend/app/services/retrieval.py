@@ -308,8 +308,13 @@ class RetrievalService:
         if not get_settings().use_qdrant:
             return None
         try:
+            # Fetch a generous global node pool: search_nodes returns hits across
+            # ALL documents, so a small cap starves the already-selected document
+            # of its own nodes (the answer page's node may not make the global
+            # top-N). Pull enough that node_hits worth of THIS doc's nodes survive.
+            node_fetch = max(get_settings().retrieval_node_hits * 4, 40)
             hits = VectorStoreService().search_nodes(
-                request.query, max(request.top_k * 3, 10), self._resolve_strategy(request).value
+                request.query, node_fetch, self._resolve_strategy(request).value
             )
         except Exception as exc:
             trace.append(
@@ -362,13 +367,19 @@ class RetrievalService:
         pages: list[DocumentPage],
         trace: list[TraceEvent],
     ) -> list[DocumentPage] | None:
-        """BM25-rerank the candidate pages by relevance to the query.
+        """Rerank the candidate pages by relevance to the query.
 
-        Returns the reordered (and capped) page list, or ``None`` when reranking
-        is disabled or there is nothing to reorder.
+        Uses the configured provider (BM25 local, or Cohere semantic). Returns the
+        reordered (and capped) page list, or ``None`` when reranking is disabled or
+        there is nothing to reorder.
         """
         if not get_settings().retrieval_rerank or len(pages) < 2:
             return None
+        if get_settings().rerank_provider == "cohere":
+            reranked = self._cohere_rerank(request, pages, trace)
+            if reranked is not None:
+                return reranked
+            # Cohere failed; fall through to BM25 so a query is never un-reranked.
         index = BM25Index(
             k1=get_settings().bm25_k1, b=get_settings().bm25_b
         ).fit({str(page.page_number): page.page_content for page in pages})
@@ -386,6 +397,35 @@ class RetrievalService:
                 message=(
                     f"Reranked {len(pages)} page(s) with BM25; "
                     f"kept top {len(reranked)} for synthesis."
+                ),
+            )
+        )
+        return reranked
+
+    def _cohere_rerank(
+        self, request: QueryRequest, pages: list[DocumentPage], trace: list[TraceEvent]
+    ) -> list[DocumentPage] | None:
+        """Semantic rerank via Cohere. Returns None on failure so BM25 takes over."""
+        from app.services.cohere_rerank import rerank as cohere_rerank
+
+        try:
+            order = cohere_rerank(request.query, [page.page_content for page in pages])
+        except Exception as exc:
+            trace.append(
+                TraceEvent(stage="rerank", message=f"Cohere rerank failed ({exc}); using BM25.")
+            )
+            return None
+        reranked = [pages[i] for i in order if 0 <= i < len(pages)]
+        for page in pages:  # any pages top_n dropped keep original order at the tail
+            if page not in reranked:
+                reranked.append(page)
+        reranked = reranked[:_MAX_RERANKED_PAGES]
+        trace.append(
+            TraceEvent(
+                stage="rerank",
+                message=(
+                    f"Reranked {len(pages)} page(s) with Cohere "
+                    f"{get_settings().cohere_rerank_model}; kept top {len(reranked)}."
                 ),
             )
         )
