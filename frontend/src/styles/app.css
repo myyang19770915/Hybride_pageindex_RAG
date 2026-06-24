@@ -1282,3 +1282,161 @@ textarea {
     border-bottom: 1px solid #d8e6ef;
   }
 }
+
+/* --- Eval panel --- */
+.eval {
+  flex: 1;
+  min-height: 0;
+  display: flex;
+  flex-direction: column;
+  background: #fff;
+  border: 1px solid #dce7ef;
+  border-radius: 12px;
+  overflow: hidden;
+}
+
+.eval-header {
+  padding: 14px 20px;
+  border-bottom: 1px solid #e4eef4;
+}
+
+.eval-header h2 {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  margin: 0 0 4px;
+  font-size: 16px;
+}
+
+.eval-hint {
+  color: #607086;
+  font-size: 13px;
+}
+
+.eval-controls {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: flex-end;
+  gap: 12px;
+  padding: 16px 20px;
+  border-bottom: 1px solid #e4eef4;
+}
+
+.eval-controls label {
+  display: grid;
+  gap: 4px;
+  font-size: 12px;
+  color: #52667a;
+}
+
+.eval-controls select,
+.eval-controls input {
+  min-height: 34px;
+  border-radius: 8px;
+  border: 1px solid #c8dae7;
+  padding: 0 8px;
+  background: #fff;
+}
+
+.eval-controls input {
+  width: 110px;
+}
+
+.eval-run {
+  margin-left: auto;
+}
+
+.eval-note {
+  margin: 12px 20px 0;
+  color: #607086;
+  font-size: 13px;
+}
+
+.eval-metrics {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 12px;
+  padding: 16px 20px 4px;
+}
+
+.eval-metric {
+  min-width: 96px;
+  border: 1px solid #e4eef4;
+  border-radius: 10px;
+  padding: 10px 14px;
+  display: grid;
+  gap: 2px;
+}
+
+.eval-metric--primary {
+  border-color: #1677b9;
+  background: #eff7fc;
+}
+
+.eval-metric-value {
+  font-size: 20px;
+  font-weight: 700;
+  color: #172033;
+}
+
+.eval-metric-label {
+  font-size: 12px;
+  color: #607086;
+}
+
+.eval-settings {
+  padding: 4px 20px 12px;
+  color: #607086;
+  font-size: 12px;
+}
+
+.eval-table-wrap {
+  flex: 1;
+  min-height: 0;
+  overflow: auto;
+  padding: 0 20px 20px;
+}
+
+.eval-table {
+  width: 100%;
+  border-collapse: collapse;
+  font-size: 13px;
+}
+
+.eval-table th,
+.eval-table td {
+  text-align: left;
+  padding: 8px 10px;
+  border-bottom: 1px solid #eef3f7;
+  vertical-align: top;
+}
+
+.eval-table th {
+  position: sticky;
+  top: 0;
+  background: #f7fafc;
+  color: #52667a;
+  font-weight: 600;
+}
+
+.eval-miss {
+  background: #fdf3f3;
+}
+
+.eval-ok {
+  color: #2fa85a;
+}
+
+.eval-bad {
+  color: #d2544a;
+}
+
+.eval-q {
+  max-width: 520px;
+}
+
+.eval-file {
+  display: block;
+  font-size: 11px;
+  color: #8597a8;
+}

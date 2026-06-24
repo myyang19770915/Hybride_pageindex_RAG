@@ -102,6 +102,50 @@ export type IngestionJobResponse = {
   message?: string;
 };
 
+export type GoldenItem = {
+  id: string;
+  query: string;
+  file_name: string;
+  page_number: number;
+  expected_answer: string;
+};
+
+export type EvalConfig = {
+  top_k?: number;
+  strategy?: string | null;
+  rerank_provider?: string | null;
+  cohere_model?: string | null;
+  node_hits?: number | null;
+  limit?: number;
+};
+
+export type EvalItemResult = {
+  id: string;
+  query: string;
+  document_id: string;
+  file_name: string;
+  page_number: number;
+  doc_hit: boolean;
+  page_hit: boolean;
+  rank: number | null;
+  status: string;
+  citations: [string, number, number][];
+};
+
+export type EvalRunResult = {
+  n: number;
+  settings: Record<string, unknown>;
+  metrics: {
+    doc_hit_rate: number;
+    page_hit_rate: number;
+    mrr: number;
+    answered_rate: number;
+    mean_latency_ms: number;
+    per_status: Record<string, number>;
+  };
+  items: EvalItemResult[];
+};
+
 async function getJson<T>(path: string): Promise<T> {
   const response = await fetch(`${API_BASE}${path}`);
   if (!response.ok) {
@@ -241,5 +285,7 @@ export const api = {
       throw new Error("Stream finished without a final answer.");
     }
     return finalResponse;
-  }
+  },
+  evalGolden: () => getJson<GoldenItem[]>("/eval/golden"),
+  evalRun: (config: EvalConfig) => postJson<EvalRunResult>("/eval/run", config)
 };

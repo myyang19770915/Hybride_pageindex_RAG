@@ -1,5 +1,6 @@
 import {
   AlertCircle,
+  BarChart3,
   CheckCircle2,
   FileSearch,
   FlaskConical,
@@ -34,6 +35,7 @@ import {
   api
 } from "./api/client";
 import { DocumentExplorer } from "./components/DocumentExplorer";
+import { EvalPanel } from "./components/EvalPanel";
 import { MineruPlayground } from "./components/MineruPlayground";
 import { TraceTimeline } from "./components/TraceTimeline";
 
@@ -170,11 +172,11 @@ export function App() {
   const [processingJob, setProcessingJob] = useState(false);
   const [explorerDocId, setExplorerDocId] = useState<string | null>(null);
   const [evidence, setEvidence] = useState<Evidence>(null);
-  const [showMineru, setShowMineru] = useState(false);
+  const [view, setView] = useState<"chat" | "mineru" | "eval">("chat");
   const pollAttempts = useRef(0);
 
   function openDocument(documentId: string, highlight: Evidence = null) {
-    setShowMineru(false);
+    setView("chat");
     setExplorerDocId(documentId);
     setEvidence(highlight);
   }
@@ -403,21 +405,31 @@ export function App() {
 
         <div className="nav-tabs">
           <button
-            className={`nav-tab${showMineru ? "" : " nav-tab--active"}`}
-            onClick={() => setShowMineru(false)}
+            className={`nav-tab${view === "chat" ? " nav-tab--active" : ""}`}
+            onClick={() => setView("chat")}
             type="button"
           >
             <MessageSquare size={15} /> 對話
           </button>
           <button
-            className={`nav-tab${showMineru ? " nav-tab--active" : ""}`}
+            className={`nav-tab${view === "mineru" ? " nav-tab--active" : ""}`}
             onClick={() => {
-              setShowMineru(true);
+              setView("mineru");
               setExplorerDocId(null);
             }}
             type="button"
           >
             <FlaskConical size={15} /> MinerU 測試
+          </button>
+          <button
+            className={`nav-tab${view === "eval" ? " nav-tab--active" : ""}`}
+            onClick={() => {
+              setView("eval");
+              setExplorerDocId(null);
+            }}
+            type="button"
+          >
+            <BarChart3 size={15} /> 評估
           </button>
         </div>
         {uploadJob && (
@@ -550,7 +562,9 @@ export function App() {
       </aside>
 
       <section className="workspace">
-        {showMineru ? (
+        {view === "eval" ? (
+          <EvalPanel />
+        ) : view === "mineru" ? (
           <MineruPlayground />
         ) : explorerDocId ? (
           <section className="explorer-shell">
