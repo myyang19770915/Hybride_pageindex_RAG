@@ -102,6 +102,24 @@ export type IngestionJobResponse = {
   message?: string;
 };
 
+export type EvidenceBlock = {
+  index: number;
+  type: string;
+  text: string;
+  bbox: [number, number, number, number]; // normalised x0,y0,x1,y1 in 0..1
+  matched: boolean;
+  score: number;
+};
+
+export type PageEvidence = {
+  document_id: string;
+  page_number: number;
+  page_width: number;
+  page_height: number;
+  has_regions: boolean;
+  blocks: EvidenceBlock[];
+};
+
 export type GoldenItem = {
   id: string;
   query: string;
@@ -303,5 +321,12 @@ export const api = {
   evalGolden: () => getJson<GoldenItem[]>("/eval/golden"),
   evalRun: (config: EvalConfig) => postJson<EvalRunResult>("/eval/run", config),
   evalGenerate: (config: GenerateConfig) =>
-    postJson<GenerateResult>("/eval/generate", config)
+    postJson<GenerateResult>("/eval/generate", config),
+  documentPageImageUrl: (documentId: string, page: number) =>
+    `${API_BASE}/documents/${documentId}/pages/${page}/image`,
+  pageEvidence: (
+    documentId: string,
+    page: number,
+    body: { answer: string; query: string }
+  ) => postJson<PageEvidence>(`/documents/${documentId}/pages/${page}/evidence`, body)
 };

@@ -36,11 +36,20 @@ import {
 } from "./api/client";
 import { DocumentExplorer } from "./components/DocumentExplorer";
 import { EvalPanel } from "./components/EvalPanel";
+import { EvidenceModal } from "./components/EvidenceModal";
 import { MineruPlayground } from "./components/MineruPlayground";
 import { TraceTimeline } from "./components/TraceTimeline";
 
 type Evidence = { start: number; end: number } | null;
 type Citation = QueryResponse["citations"][number];
+type EvidenceTarget = {
+  documentId: string;
+  fileName: string;
+  start: number;
+  end: number;
+  answer: string;
+  query: string;
+};
 
 type ChatMessage = {
   id: string;
@@ -172,6 +181,7 @@ export function App() {
   const [processingJob, setProcessingJob] = useState(false);
   const [explorerDocId, setExplorerDocId] = useState<string | null>(null);
   const [evidence, setEvidence] = useState<Evidence>(null);
+  const [evidenceTarget, setEvidenceTarget] = useState<EvidenceTarget | null>(null);
   const [view, setView] = useState<"chat" | "mineru" | "eval">("chat");
   const pollAttempts = useRef(0);
 
@@ -179,6 +189,21 @@ export function App() {
     setView("chat");
     setExplorerDocId(documentId);
     setEvidence(highlight);
+  }
+
+  function openEvidence(citation: Citation, message: ChatMessage) {
+    // The cited answer is this assistant message; the query is the user turn
+    // that preceded it (best signal for which page regions were used).
+    const index = messages.findIndex((m) => m.id === message.id);
+    const priorUser = messages.slice(0, index).reverse().find((m) => m.role === "user");
+    setEvidenceTarget({
+      documentId: citation.document_id,
+      fileName: citation.file_name,
+      start: citation.start_page,
+      end: citation.end_page,
+      answer: message.content,
+      query: priorUser?.content ?? ""
+    });
   }
 
   async function removeDocument(event: ReactMouseEvent, document: DocumentListItem) {
@@ -624,12 +649,7 @@ export function App() {
                       <button
                         className="citation"
                         key={`${citation.document_id}-${citation.start_page}`}
-                        onClick={() =>
-                          openDocument(citation.document_id, {
-                            start: citation.start_page,
-                            end: citation.end_page
-                          })
-                        }
+                        onClick={() => openEvidence(citation, message)}
                         type="button"
                       >
                         {citation.file_name} · 第 {citation.start_page}-{citation.end_page} 頁
@@ -662,6 +682,21 @@ export function App() {
           </section>
         )}
       </section>
+
+      {evidenceTarget && (
+        <EvidenceModal
+          documentId={evidenceTarget.documentId}
+          fileName={evidenceTarget.fileName}
+          startPage={evidenceTarget.start}
+          endPage={evidenceTarget.end}
+          answer={evidenceTarget.answer}
+          query={evidenceTarget.query}
+          onClose={() => setEvidenceTarget(null)}
+          onOpenDocument={(documentId, start, end) =>
+            openDocument(documentId, { start, end })
+          }
+        />
+      )}
     </main>
   );
 }
