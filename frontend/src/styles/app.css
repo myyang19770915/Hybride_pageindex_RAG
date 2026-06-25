@@ -1466,6 +1466,71 @@ textarea {
   padding-top: 0;
 }
 
+/* --- Eval golden generation --- */
+.eval-gen {
+  padding: 4px 20px 16px;
+}
+
+.eval-gen-hint {
+  color: #607086;
+  font-size: 12px;
+  margin: 8px 0 12px;
+}
+
+.eval-gen-docs {
+  display: grid;
+  gap: 4px;
+  max-height: 180px;
+  overflow: auto;
+  padding: 8px 12px;
+  border: 1px solid #e4eef4;
+  border-radius: 8px;
+  background: #fbfdfe;
+  margin-bottom: 12px;
+}
+
+.eval-gen-doc {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  font-size: 13px;
+  color: #24506b;
+  cursor: pointer;
+}
+
+.eval-gen-doc-name {
+  font-weight: 500;
+}
+
+.eval-gen-empty {
+  color: #8597a8;
+  font-size: 13px;
+}
+
+.eval-gen-controls {
+  padding: 0;
+  border-bottom: 0;
+}
+
+.eval-gen-append {
+  display: flex;
+  flex-direction: row;
+  align-items: center;
+  gap: 6px;
+}
+
+.eval-gen-append input {
+  min-height: 0;
+  width: auto;
+}
+
+.eval-gen-ok {
+  margin: 12px 0 0;
+  color: #2fa85a;
+  font-size: 13px;
+  font-weight: 600;
+}
+
 .eval-nowrap {
   white-space: nowrap;
 }

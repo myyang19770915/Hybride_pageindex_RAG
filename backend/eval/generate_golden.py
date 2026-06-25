@@ -15,6 +15,7 @@ from __future__ import annotations
 
 import argparse
 import json
+from collections.abc import Callable
 from pathlib import Path
 
 from app.schemas.documents import IngestionStatus
@@ -42,13 +43,25 @@ def _sample_indices(count: int, k: int) -> list[int]:
     return sorted({int(i * step) for i in range(k)})
 
 
-def _iter_golden(
+def generate_golden_items(
     service: DocumentService,
     doc_ids: list[str] | None,
     per_doc: int,
     min_chars: int,
     per_page: int,
-):
+    on_progress: Callable[[str], None] | None = None,
+) -> list[dict]:
+    """Generate golden Q&A items from the corpus.
+
+    Returns a list of GoldenItem dicts. `on_progress(msg)` receives per-page status
+    lines; pass `print` for a console run. API callers leave it None — printing CJK
+    to a cp950 Windows stdout crashes the request (see eval.run_eval.evaluate).
+    """
+
+    def _note(msg: str) -> None:
+        if on_progress is not None:
+            on_progress(msg)
+
     docs = service.list_documents(latest_only=True)
     docs = [d for d in docs if d.status == IngestionStatus.completed]
     if doc_ids:
@@ -56,6 +69,7 @@ def _iter_golden(
         docs = [d for d in docs if d.document_id in wanted]
 
     system = _SYSTEM.format(n=per_page)
+    out: list[dict] = []
     for doc in docs:
         pages = [
             p
@@ -63,7 +77,7 @@ def _iter_golden(
             if len((p.page_content or "").strip()) >= min_chars
         ]
         if not pages:
-            print(f"  [skip] {doc.file_name}: no pages with >= {min_chars} chars")
+            _note(f"  [skip] {doc.file_name}: no pages with >= {min_chars} chars")
             continue
         chosen = [pages[i] for i in _sample_indices(len(pages), per_doc)]
         for page in chosen:
@@ -72,19 +86,22 @@ def _iter_golden(
             items = (result or {}).get("items") or []
             usable = [it for it in items if isinstance(it, dict) and it.get("question")]
             if not usable:
-                print(f"  [skip] {doc.file_name} p{page.page_number}: no usable question")
+                _note(f"  [skip] {doc.file_name} p{page.page_number}: no usable question")
                 continue
             for idx, it in enumerate(usable[:per_page], start=1):
-                yield {
-                    "id": f"{doc.document_id}-p{page.page_number}-q{idx}",
-                    "query": str(it["question"]).strip(),
-                    "document_id": doc.document_id,
-                    "file_name": doc.file_name,
-                    "page_number": page.page_number,
-                    "expected_answer": str(it.get("answer", "")).strip(),
-                    "source_excerpt": excerpt[:500],
-                }
-            print(f"  [ok]   {doc.file_name} p{page.page_number}: {len(usable[:per_page])} q")
+                out.append(
+                    {
+                        "id": f"{doc.document_id}-p{page.page_number}-q{idx}",
+                        "query": str(it["question"]).strip(),
+                        "document_id": doc.document_id,
+                        "file_name": doc.file_name,
+                        "page_number": page.page_number,
+                        "expected_answer": str(it.get("answer", "")).strip(),
+                        "source_excerpt": excerpt[:500],
+                    }
+                )
+            _note(f"  [ok]   {doc.file_name} p{page.page_number}: {len(usable[:per_page])} q")
+    return out
 
 
 def main() -> None:
@@ -100,8 +117,13 @@ def main() -> None:
     doc_ids = [d.strip() for d in args.docs.split(",") if d.strip()] or None
     service = DocumentService()
 
-    items = list(
-        _iter_golden(service, doc_ids, args.per_doc, args.min_chars, args.questions_per_page)
+    items = generate_golden_items(
+        service,
+        doc_ids,
+        args.per_doc,
+        args.min_chars,
+        args.questions_per_page,
+        on_progress=print,
     )
     if not items:
         print("No golden items generated. Is the corpus ingested and the LLM reachable?")

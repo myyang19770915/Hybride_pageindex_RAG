@@ -25,6 +25,7 @@ router = APIRouter()
 
 _GOLDEN_PATH = Path(__file__).resolve().parents[3] / "eval" / "golden_set.jsonl"
 _run_lock = threading.Lock()
+_gen_lock = threading.Lock()
 
 
 class GoldenItemOut(BaseModel):
@@ -33,6 +34,20 @@ class GoldenItemOut(BaseModel):
     file_name: str
     page_number: int
     expected_answer: str = ""
+
+
+class GenerateConfig(BaseModel):
+    doc_ids: list[str] = Field(default_factory=list)  # empty = all completed documents
+    per_doc: int = Field(default=3, ge=1, le=50)  # pages sampled per document
+    questions_per_page: int = Field(default=1, ge=1, le=10)
+    min_chars: int = Field(default=200, ge=0, le=5000)  # skip thinner pages
+    append: bool = True  # append to the golden set vs. overwrite it
+
+
+class GenerateResult(BaseModel):
+    added: int  # new (deduped) items written
+    total: int  # golden-set size after the write
+    items: list[GoldenItemOut]  # the newly added items
 
 
 class EvalConfig(BaseModel):
@@ -107,6 +122,84 @@ def list_golden() -> list[GoldenItemOut]:
                 )
             )
     return items
+
+
+def _read_golden_raw() -> list[dict]:
+    """Raw golden records (all fields), in file order. Empty if the file is absent."""
+    import json
+
+    if not _GOLDEN_PATH.exists():
+        return []
+    records: list[dict] = []
+    with _GOLDEN_PATH.open(encoding="utf-8") as fh:
+        for line in fh:
+            line = line.strip()
+            if line:
+                records.append(json.loads(line))
+    return records
+
+
+@router.post("/generate", response_model=GenerateResult)
+def generate_golden(config: GenerateConfig) -> GenerateResult:
+    """Generate golden Q&A items from the corpus via the LLM and write them to the set.
+
+    Each sampled page becomes the ground-truth source for the questions written from
+    it. Synchronous and potentially slow (one LLM call per sampled page); a lock
+    serialises generation so two operators can't interleave writes to the file.
+    """
+    import json
+
+    if not _gen_lock.acquire(blocking=False):
+        raise HTTPException(
+            status_code=status.HTTP_409_CONFLICT,
+            detail="A golden-set generation is already in progress.",
+        )
+    try:
+        from eval.generate_golden import generate_golden_items
+
+        from app.services.documents import DocumentService
+
+        service = DocumentService()
+        # on_progress is intentionally None: printing CJK to a cp950 Windows stdout
+        # crashes the request (same hazard as the eval-run path).
+        generated = generate_golden_items(
+            service,
+            config.doc_ids or None,
+            config.per_doc,
+            config.min_chars,
+            config.questions_per_page,
+            on_progress=None,
+        )
+
+        existing = [] if not config.append else _read_golden_raw()
+        seen_ids = {r["id"] for r in existing}
+        fresh = [it for it in generated if it["id"] not in seen_ids]
+
+        if generated:  # only touch the file when the LLM actually produced something
+            _GOLDEN_PATH.parent.mkdir(parents=True, exist_ok=True)
+            records = existing + fresh if config.append else generated
+            with _GOLDEN_PATH.open("w", encoding="utf-8") as fh:
+                for record in records:
+                    fh.write(json.dumps(record, ensure_ascii=False) + "\n")
+
+        added = fresh if config.append else generated
+        total = len(_read_golden_raw())
+        return GenerateResult(
+            added=len(added),
+            total=total,
+            items=[
+                GoldenItemOut(
+                    id=it["id"],
+                    query=it["query"],
+                    file_name=it.get("file_name", ""),
+                    page_number=int(it["page_number"]),
+                    expected_answer=it.get("expected_answer", ""),
+                )
+                for it in added
+            ],
+        )
+    finally:
+        _gen_lock.release()
 
 
 @router.post("/run", response_model=EvalRunResult)

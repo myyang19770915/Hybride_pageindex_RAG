@@ -110,6 +110,20 @@ export type GoldenItem = {
   expected_answer: string;
 };
 
+export type GenerateConfig = {
+  doc_ids?: string[];
+  per_doc?: number;
+  questions_per_page?: number;
+  min_chars?: number;
+  append?: boolean;
+};
+
+export type GenerateResult = {
+  added: number;
+  total: number;
+  items: GoldenItem[];
+};
+
 export type EvalConfig = {
   top_k?: number;
   strategy?: string | null;
@@ -287,5 +301,7 @@ export const api = {
     return finalResponse;
   },
   evalGolden: () => getJson<GoldenItem[]>("/eval/golden"),
-  evalRun: (config: EvalConfig) => postJson<EvalRunResult>("/eval/run", config)
+  evalRun: (config: EvalConfig) => postJson<EvalRunResult>("/eval/run", config),
+  evalGenerate: (config: GenerateConfig) =>
+    postJson<GenerateResult>("/eval/generate", config)
 };
