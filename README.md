@@ -1,6 +1,6 @@
 # Hybride PageIndex RAG
 
-私有化地端「推理式 RAG / 知識庫(KM)」系統。上傳 PDF → MinerU 解析 → PageIndex 章節樹 + 向量化;查詢端是一個 **Agno Agent**,會自主做混合檢索、查 PostgreSQL 取頁原文、判斷可否回答(不行就反問),並以 **ChatGPT 式聊天介面**逐字串流回答、保留會話記憶。另附 **MinerU 解析測試 Playground** 可互動測試各種解析參數。
+私有化地端「推理式 RAG / 知識庫(KM)」系統。上傳 PDF → MinerU 解析 → PageIndex 章節樹 + 向量化;查詢端是一個 **Agno Agent**,會自主做混合檢索、查 PostgreSQL 取頁原文、判斷可否回答(不行就反問),並以 **ChatGPT 式聊天介面**逐字串流回答、保留會話記憶。回答的每個引用都能點開**證據檢視 modal**,在原始頁面影像上**框出答案實際引用到的文字區塊**。另附 **MinerU 解析測試 Playground** 可互動測試各種解析參數,以及 **RAG 評估分頁**用 golden 題庫量測檢索品質、並可依文件自動產生題庫。
 
 ## 技術棧 (Stack)
 
@@ -15,11 +15,12 @@
 ```
 ┌─────────────┐        ┌──────────────────────── FastAPI 後端 (:8200) ───────────────────────┐
 │ React 前端  │        │                                                                      │
-│  (:5173)    │  /api  │  routes: health / auth / documents / query / chat / mineru          │
+│  (:5173)    │  /api  │  routes: health / auth / documents / query / chat / mineru / eval   │
 │  Vite proxy ├───────▶│                                                                      │
 │  ├ 對話聊天 │        │  擷取 (ingestion):                                                   │
-│  └ MinerU   │        │    upload → MinerU 解析 → 頁碼標記 Markdown → PageIndex 章節樹        │
-│    測試頁   │        │    → 每節點 summary 向量 + BM25 sparse 寫入 Qdrant、頁面寫入 PG       │
+│  ├ MinerU   │        │    upload → MinerU 解析 → 頁碼標記 Markdown → PageIndex 章節樹        │
+│  │  測試頁  │        │    → 每節點 summary 向量 + BM25 sparse 寫入 Qdrant、頁面寫入 PG       │
+│  └ 評估     │        │                                                                      │
 └─────────────┘        │                                                                      │
                        │  查詢 (Agno Agent):                                                  │
                        │    search_knowledge(Qdrant 混合檢索) → PostgresTools 取頁原文        │
@@ -36,6 +37,8 @@
 - **Agent 自主檢索**:`search_knowledge` 工具包現有 Qdrant 混合檢索;`PostgresTools` 用固定 SQL 依 `document_id` + 頁碼範圍取 `km_document_pages` 原文;答不出來時回 `need_clarification` / `insufficient`。
 - **會話記憶**:Agno `PostgresDb`(`add_history_to_context`,保留前 5 輪),存於專屬表 `hybride_chat_sessions`。
 - **MinerU Playground**:後端代理 MinerU 自帶的 `mineru-api`(常駐 sidecar,埠 8201),可測 pipeline / vlm / hybrid 等參數。
+- **引用證據框選**:對話回答的每個引用可點開「證據」modal,後端用 `pypdfium2` 把引用頁渲成 PNG(快取),從 MinerU `middle.json` 取該頁文字區塊 bbox(以 `page_size` 正規化成 0~1),並用大小寫無關的字元 bigram 比對,把**答案實際引用到的區塊**框成琥珀色、其餘區塊淡框;支援引用頁範圍翻頁。全部即時讀磁碟上既有產物,不需重新擷取或改資料庫。
+- **RAG 評估(評估分頁)**:用 golden 題庫量測 `page_hit` / `doc_hit` / `MRR` / `answered` 等指標,並可切換 `strategy` / `reranker` / `node_hits` 做 A/B;也能**依選定文件用 LLM 自動產生 golden 題庫**(每頁出題、答案來源即該頁)。
 
 ## 啟動 (Run)
 
@@ -137,6 +140,8 @@ uv run python scripts/e2e_mineru_live.py
 | GET | `/api/documents?latest_only=` | 文件清單(`latest_only=true` 只列最新版)。 |
 | GET | `/api/documents/{id}` | 單一文件詳情(含 PageIndex 章節樹 `toc`)。 |
 | GET | `/api/documents/{id}/pages` | 逐頁原文。 |
+| GET | `/api/documents/{id}/pages/{page}/image` | 該頁渲染成 PNG(`pypdfium2`,結果快取),供證據框選的底圖。 |
+| POST | `/api/documents/{id}/pages/{page}/evidence` | 該頁文字區塊(MinerU `middle.json` 的 `para_blocks`,bbox 正規化 0~1)+ 以 body 的 `answer` / `query` 比對標記 `matched` 的答案來源區塊。無 MinerU 區塊資料時回 `has_regions=false`。 |
 | GET | `/api/documents/{id}/versions` | 同檔名的所有版本。 |
 | GET | `/api/documents/jobs/{job_id}` | 擷取任務狀態(queued / processing / completed / failed)。前端輪詢此端點顯示進度。 |
 | POST | `/api/documents/jobs/{job_id}/process` | 同步觸發擷取(背景 worker 開啟時不需手動呼叫)。 |
@@ -154,6 +159,13 @@ uv run python scripts/e2e_mineru_live.py
 | GET | `/api/chat/sessions` | 歷史會話清單(`session_id` / `title`=首句 / `updated_at`)。 |
 | GET | `/api/chat/sessions/{id}/messages` | 重載某會話的完整 user/assistant 訊息。 |
 | DELETE | `/api/chat/sessions/{id}` | 刪除某會話。 |
+
+### 評估 `eval`(檢索品質 / Golden 題庫)
+| 方法 | 路徑 | 說明 |
+|------|------|------|
+| GET | `/api/eval/golden` | 目前 golden 題庫(`query` / `file_name` / `page_number` / `expected_answer`)。 |
+| POST | `/api/eval/run` | 用 golden set 跑檢索(預設不做 LLM 合成,快約 30×)並回指標:`doc_hit_rate` / `page_hit_rate` / `mrr` / `answered_rate` / 延遲。可帶 `strategy` / `rerank_provider` / `cohere_model` / `node_hits` / `top_k` / `limit` 暫時覆寫設定做 A/B。 |
+| POST | `/api/eval/generate` | 依選定文件用 LLM 產生 golden 題目(body:`doc_ids`(空=全部已完成文件)/ `per_doc` / `questions_per_page` / `min_chars` / `append`)。依 id 去重;回 `added` / `total` 與新增題目。 |
 
 ### MinerU 解析測試 `mineru`
 | 方法 | 路徑 | 說明 |
@@ -224,6 +236,24 @@ Retrieval strategy can be set globally (`RETRIEVAL_STRATEGY=dense|bm25|hybrid`) 
 ```powershell
 Invoke-RestMethod http://127.0.0.1:8200/api/query -Method Post -ContentType "application/json" -Body '{"query":"真空度不足","mode":"auto","top_k":5,"strategy":"bm25"}'
 ```
+
+## 對話引用證據(頁面框選)
+
+在「對話」分頁,點任一回答下方的引用 chip 會開啟**證據檢視 modal**:在引用頁的原始 PDF 影像上,框出**答案實際引用到的文字區塊**。
+
+- **資料來源**:區塊座標來自 MinerU 的 `*_middle.json`(`pdf_info[].para_blocks` 的 `bbox`,與 `page_size` 同座標空間;content_list 的 bbox 是另一個縮放空間,不採用)。bbox 以 `page_size` 正規化成 0~1 比例,前端再依影像實際尺寸用百分比疊框,與渲染倍率無關。
+- **頁面影像**:後端用 `pypdfium2`(MinerU 既有相依,免裝新套件)把原始上傳 PDF 的該頁渲成 PNG,快取於 `uploads/render/{doc}/`。
+- **比對哪些區塊**:`POST …/evidence` 收 `answer` / `query`,用**大小寫無關的字元 bigram overlap** 為每個區塊評分,超過門檻者標 `matched`(命中為琥珀色框,其餘為淡灰框);若無區塊跨過門檻,仍保底標記最相關的一塊,modal 不會空白。
+- **優雅退回**:示範文件或以 `pypdf` fallback 擷取、沒有 `middle.json` 的文件,`evidence` 回 `has_regions=false`,modal 僅顯示頁面影像(或在無原始 PDF 時提示無法產生影像)。
+- 全部即時讀磁碟上既有的 MinerU 產物與原始 PDF,**不需重新擷取、不改資料庫**,既有文件即時可用。modal 內可在引用頁範圍翻頁,並以「檢視全文」開啟既有的文件章節 / 逐頁瀏覽器。
+
+## RAG 評估(評估分頁)
+
+「評估」分頁用一組 **golden 題庫**(`backend/eval/golden_set.jsonl`,每題標註正解文件與頁碼)量測檢索品質,並支援依文件自動產生題庫。
+
+- **執行評估**(`POST /api/eval/run`):把 golden set 跑過檢索 pipeline,回 `page_hit_rate` / `doc_hit_rate` / `MRR` / `answered_rate` / 延遲等指標。預設**只跑檢索不做 LLM 合成**(約 30× 快),適合掃描調參。前端可切換 `strategy`(dense / hybrid / bm25)、`reranker`(bm25 / cohere)、`node_hits`、`top_k`、題數,於單次執行內暫時覆寫全域設定做 A/B(執行中設定為行程全域,單人評估工具可接受)。
+- **製作 Golden 題庫**(`POST /api/eval/generate`):勾選已完成文件、設定每文件取樣頁數 / 每頁題數 / 最小字數 / 是否附加,後端對取樣頁用 LLM 出題(該頁即為正解來源),依 id 去重後寫入 golden set 並刷新題庫表。建議事後人工校正。
+- 也可用命令列:`PYTHONPATH=backend uv run python -m eval.run_eval --label baseline` 與 `python -m eval.generate_golden --per-doc 3`,並以 `eval.compare` 比較不同 run。
 
 ## 環境設定（`.env`）說明
 

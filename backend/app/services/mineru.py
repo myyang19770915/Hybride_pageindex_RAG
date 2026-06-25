@@ -89,6 +89,17 @@ class MineruClient:
                 return candidates[0]
         return None
 
+    def find_middle_output(self, doc_key: str) -> Path | None:
+        """MinerU's ``*_middle.json`` (per-page ``page_size`` + ``para_blocks`` with
+        bbox in that same coordinate space) — the source of truth for region
+        highlighting. content_list.json bbox is a different scaled space, so it is
+        not used for overlays."""
+        for output_dir in self._mineru_dirs(doc_key):
+            candidates = sorted(output_dir.rglob("*_middle.json"))
+            if candidates:
+                return candidates[0]
+        return None
+
     def read_markdown_or_fallback(self, doc_key: str, pdf_path: Path) -> tuple[str, str]:
         existing_content_list = self.find_content_list_output(doc_key)
         if existing_content_list:
